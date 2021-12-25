@@ -49,13 +49,13 @@ func rewrite(path string, info os.FileInfo, err error) error {
 		// Seek to position
 		_, err = f.Seek(i, 0)
 		if err != nil {
-			return fmt.Errorf("Failed to seek to %d: %v", i, err)
+			return fmt.Errorf("failed to seek to %d: %v", i, err)
 		}
 
 		// Read two bytes
 		_, err = f.Read(buf1)
 		if err != nil {
-			return fmt.Errorf("Failed to read to buf1: %v", err)
+			return fmt.Errorf("failed to read to buf1: %v", err)
 		}
 
 		// Swap bytes
@@ -64,24 +64,27 @@ func rewrite(path string, info os.FileInfo, err error) error {
 		// Write once
 		_, err = f.WriteAt(buf2, i)
 		if err != nil {
-			return fmt.Errorf("Failed to write buf2: %v", err)
+			return fmt.Errorf("failed to write buf2: %v", err)
 		}
 
 		// Force filesystem sync
 		err = f.Sync()
 		if err != nil {
-			return fmt.Errorf("Failed to sync: %v", err)
+			return fmt.Errorf("failed to sync: %v", err)
 		}
 
 		// Write original
 		_, err = f.WriteAt(buf1, 1)
 		if err != nil {
-			return fmt.Errorf("Failed to write buf1: %v", err)
+			return fmt.Errorf("failed to write buf1: %v", err)
 		}
 
 		err = bar.Add(BLOCKSIZE)
 		if err != nil {
-			panic(err) // Really shouldn't ever reach this point
+			err = bar.Finish()
+			if err != nil {
+				panic(err) // Really shouldn't ever reach this point
+			}
 		}
 	}
 
