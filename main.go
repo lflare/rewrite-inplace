@@ -22,6 +22,11 @@ func rewrite(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
+	// Return early if too small to actually balance
+	if info.Size() < BLOCKSIZE {
+		return nil
+	}
+
 	// Open file
 	f, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
 	if err != nil {
