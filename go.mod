@@ -4,6 +4,7 @@ go 1.17
 
 require (
 	github.com/schollz/progressbar/v3 v3.8.5
+	github.com/sirupsen/logrus v1.8.1
 	github.com/stretchr/testify v1.3.0
 )
 

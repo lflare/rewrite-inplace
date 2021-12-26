@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -10,7 +10,10 @@ import (
 	"time"
 
 	progressbar "github.com/schollz/progressbar/v3"
+	"github.com/sirupsen/logrus"
 )
+
+var log *logrus.Logger
 
 const BLOCKSIZE = 128_000
 
@@ -20,13 +23,6 @@ func writeSync(file *os.File, bytes []byte, offset int64) error {
 	if err != nil {
 		return fmt.Errorf("failed to write buf2: %v", err)
 	}
-
-	// Force filesystem sync
-	err = file.Sync()
-	if err != nil {
-		return fmt.Errorf("failed to sync: %v", err)
-	}
-
 	return nil
 }
 
@@ -66,68 +62,76 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	defer f.Close()
 
 	// Prepare buffer
-	buf1 := make([]byte, 2)
-	buf2 := make([]byte, 2)
+	buf := make([]byte, 2)
 
 	// Print
-	fmt.Printf("Balancing file '%s'\n", path)
+	log.Infof("Rewriting file '%s'\n", path)
 
-	// Prepare progress bar
-	bar := progressbar.Default(info.Size() - 2)
+	// Run two times, swapping both times
+	for n := 0; n < 2; n++ {
+		// Prepare progress bar
+		bar := progressbar.DefaultBytes(info.Size(), fmt.Sprintf("rewriting [%d/2]", n+1))
 
-	// Loop through whole file in steps of block size
-	for i := int64(0); i < info.Size()-2; i += BLOCKSIZE {
-		// Read two bytes at offset
-		_, err = f.ReadAt(buf1, i)
-		if err != nil {
-			return fmt.Errorf("failed to read to buf1: %v", err)
-		}
-
-		// Swap bytes
-		buf2[0], buf2[1] = buf1[1], buf1[0]
-
-		// Write swapped bytes
-		err = writeSync(f, buf2, i)
-		if err != nil {
-			return err
-		}
-
-		// Write original bytes
-		err = writeSync(f, buf1, i)
-		if err != nil {
-			return err
-		}
-
-		// Propagate progress bar
-		err = bar.Add(BLOCKSIZE)
-		if err != nil {
-			err = bar.Finish()
+		// Loop through whole file in steps of block size
+		for i := int64(0); i < info.Size()-2; i += BLOCKSIZE {
+			// Read two bytes at offset
+			_, err = f.ReadAt(buf, i)
 			if err != nil {
-				panic(err) // Really shouldn't ever reach this point
+				return fmt.Errorf("failed to read to buf: %v", err)
+			}
+
+			// Swap bytes
+			buf[0], buf[1] = buf[1], buf[0]
+
+			// Write swapped bytes
+			err = writeSync(f, buf, i)
+			if err != nil {
+				return err
+			}
+
+			// Propagate progress bar
+			err = bar.Add(BLOCKSIZE)
+			if err != nil {
+				err = bar.Finish()
+				if err != nil {
+					panic(err) // Really shouldn't ever reach this point
+				}
 			}
 		}
 
-		// Check if signal was raised
-		select {
-		case <-done:
-			return nil
-		case <-time.After(1):
+		// Force filesystem sync
+		err = f.Sync()
+		if err != nil {
+			return fmt.Errorf("failed to sync: %v", err)
+		}
+
+		// Finish progress bar
+		err = bar.Finish()
+		if err != nil {
+			panic(err) // Really shouldn't ever reach this point
 		}
 	}
 
-	// Finish progress bar
-	err = bar.Finish()
-	if err != nil {
-		panic(err) // Really shouldn't ever reach this point
+	// Check if signal was raised
+	select {
+	case <-done:
+		return io.EOF
+	case <-time.After(1):
 	}
 
 	return nil
 }
 
+func init() {
+	log = logrus.New()
+}
+
 func main() {
 	// Get all files and folders
 	err := filepath.Walk(os.Args[1], Rewrite)
-	if err != nil {
-		log.Println(err)
+	if err == io.EOF {
+		log.Infof("program exited successfully")
+	} else if err != nil {
+		panic(err)
 	}
 }
