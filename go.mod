@@ -1,4 +1,4 @@
-module zfs-inplace
+module rewrite-inplace
 
 go 1.17
 

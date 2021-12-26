@@ -9,4 +9,4 @@ build_linux :
 
 .PHONY : clean
 clean :
-	rm zfs-inplace
+	rm rewrite-inplace
