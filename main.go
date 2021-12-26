@@ -11,7 +11,15 @@ import (
 
 const BLOCKSIZE = 128_000
 
-func rewrite(path string, info os.FileInfo, err error) error {
+func Rewrite(path string, info os.FileInfo, err error) error {
+	// Get file info if empty
+	if info == nil {
+		info, err = os.Stat(path)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Return early if error
 	if err != nil {
 		return err
@@ -99,7 +107,7 @@ func rewrite(path string, info os.FileInfo, err error) error {
 
 func main() {
 	// Get all files and folders
-	err := filepath.Walk(os.Args[1], rewrite)
+	err := filepath.Walk(os.Args[1], Rewrite)
 	if err != nil {
 		log.Println(err)
 	}
