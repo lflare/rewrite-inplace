@@ -4,12 +4,31 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	progressbar "github.com/schollz/progressbar/v3"
 )
 
 const BLOCKSIZE = 128_000
+
+func writeSync(file *os.File, bytes []byte, offset int64) error {
+	// Write once
+	_, err := file.WriteAt(bytes, offset)
+	if err != nil {
+		return fmt.Errorf("failed to write buf2: %v", err)
+	}
+
+	// Force filesystem sync
+	err = file.Sync()
+	if err != nil {
+		return fmt.Errorf("failed to sync: %v", err)
+	}
+
+	return nil
+}
 
 func Rewrite(path string, info os.FileInfo, err error) error {
 	// Get file info if empty
@@ -35,6 +54,10 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
+	// Prepare signal catching
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
 	// Open file
 	f, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
 	if err != nil {
@@ -54,14 +77,8 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 
 	// Loop through whole file in steps of block size
 	for i := int64(0); i < info.Size()-2; i += BLOCKSIZE {
-		// Seek to position
-		_, err = f.Seek(i, 0)
-		if err != nil {
-			return fmt.Errorf("failed to seek to %d: %v", i, err)
-		}
-
-		// Read two bytes
-		_, err = f.Read(buf1)
+		// Read two bytes at offset
+		_, err = f.ReadAt(buf1, i)
 		if err != nil {
 			return fmt.Errorf("failed to read to buf1: %v", err)
 		}
@@ -69,30 +86,32 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		// Swap bytes
 		buf2[0], buf2[1] = buf1[1], buf1[0]
 
-		// Write once
-		_, err = f.WriteAt(buf2, i)
+		// Write swapped bytes
+		err = writeSync(f, buf2, i)
 		if err != nil {
-			return fmt.Errorf("failed to write buf2: %v", err)
+			return err
 		}
 
-		// Force filesystem sync
-		err = f.Sync()
+		// Write original bytes
+		err = writeSync(f, buf1, i)
 		if err != nil {
-			return fmt.Errorf("failed to sync: %v", err)
+			return err
 		}
 
-		// Write original
-		_, err = f.WriteAt(buf1, 1)
-		if err != nil {
-			return fmt.Errorf("failed to write buf1: %v", err)
-		}
-
+		// Propagate progress bar
 		err = bar.Add(BLOCKSIZE)
 		if err != nil {
 			err = bar.Finish()
 			if err != nil {
 				panic(err) // Really shouldn't ever reach this point
 			}
+		}
+
+		// Check if signal was raised
+		select {
+		case <-done:
+			return nil
+		case <-time.After(1):
 		}
 	}
 
