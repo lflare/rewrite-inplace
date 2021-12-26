@@ -95,6 +95,9 @@ func TestRewrite(t *testing.T) {
 		randomString := RandStringBytesMaskImprSrcUnsafe(size)
 		randomBytes := []byte(randomString)
 
+		// Log attempt
+		t.Logf("starting test with %d - %s", size, ByteCountIEC(int64(size)))
+
 		// Create file
 		f, err := os.Create(path)
 		if err != nil {
@@ -124,6 +127,6 @@ func TestRewrite(t *testing.T) {
 		assert.Equal(t, randomBytes, writtenBytes, "[step 2] rewritten bytes != written bytes")
 
 		// Log success
-		t.Logf("successfully tested %s", ByteCountIEC(int64(size)))
+		t.Logf("successfully tested with %d - %s", size, ByteCountIEC(int64(size)))
 	}
 }
