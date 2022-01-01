@@ -13,8 +13,6 @@ builds:
       - GO111MODULE=on
     flags:
       - -trimpath
-    ldflags:
-      - "{{.Env.LDFLAGS}}"
     hooks:
       post:
         - /bin/sh -c "upx -q '{{.Path}}' || true"
