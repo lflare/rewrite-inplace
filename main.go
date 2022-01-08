@@ -170,9 +170,11 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	oldHashString := fmt.Sprintf("%x", oldHash.Sum(nil))
 	newHashString := fmt.Sprintf("%x", newHash.Sum(nil))
 	if oldHashString != newHashString {
-		io.Copy(file, backupFile)
+		bar := progressbar.DefaultBytes(info.Size(), "restoring")
+		io.Copy(io.MultiWriter(file, bar), backupFile)
+		bar.Finish()
 		os.Remove(backupPath)
-		return fmt.Errorf("unexpected hash of file '%s', '%s' != '%s', restoring backup", path, oldHashString, newHashString)
+		return fmt.Errorf("unexpected hash of file '%s', '%s' != '%s', restored backup", path, oldHashString, newHashString)
 	} else {
 		os.Remove(backupPath)
 	}
