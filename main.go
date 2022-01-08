@@ -95,10 +95,12 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	defer backupFile.Close()
 
 	// Copy to backup file
-	written, err := io.Copy(backupFile, file)
+	bar := progressbar.DefaultBytes(info.Size(), "backing up")
+	written, err := io.Copy(io.MultiWriter(backupFile, bar), file)
 	if err != nil {
 		return err
 	}
+	bar.Finish()
 	log.Infof("Backed up file '%s' of size %d\n", path, written)
 
 	// Calculate original hash
