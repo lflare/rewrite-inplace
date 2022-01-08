@@ -75,10 +75,6 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
-	// Prepare signal catching
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
 	// Open file
 	file, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
 	if err != nil {
@@ -95,13 +91,15 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	defer backupFile.Close()
 
 	// Copy to backup file
+	log.Infof("Backing up file '%s'", path)
 	bar := progressbar.DefaultBytes(info.Size(), "backing up")
-	written, err := io.Copy(io.MultiWriter(backupFile, bar), file)
+	_, err = io.Copy(io.MultiWriter(backupFile, bar), file)
 	if err != nil {
 		return err
 	}
 	bar.Finish()
-	log.Infof("Backed up file '%s' of size %d\n", path, written)
+	backupFile.Sync()
+	log.Infof("Backed up file '%s'", path)
 
 	// Calculate original hash
 	oldHash := sha256.New()
@@ -113,7 +111,11 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	buf := make([]byte, 2)
 
 	// Print
-	log.Infof("Rewriting file '%s'\n", path)
+	log.Infof("Rewriting file '%s'", path)
+
+	// Prepare signal catching
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	// Run two times, swapping both times
 	for n := 0; n < 2; n++ {
@@ -178,6 +180,9 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	} else {
 		os.Remove(backupPath)
 	}
+
+	// Log
+	log.Infof("Rewritten file '%s'", path)
 
 	// Save progress
 	completed = append(completed, path)
