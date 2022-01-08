@@ -90,22 +90,16 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	}
 	defer backupFile.Close()
 
-	// Copy to backup file
+	// Copy to backup file while calculating hash
 	log.Infof("Backing up file '%s'", path)
 	bar := progressbar.DefaultBytes(info.Size(), "backing up")
-	_, err = io.Copy(io.MultiWriter(backupFile, bar), file)
-	if err != nil {
+	oldHash := sha256.New()
+	if _, err = io.Copy(io.MultiWriter(backupFile, bar, oldHash), file); err != nil {
 		return err
 	}
 	bar.Finish()
 	backupFile.Sync()
 	log.Infof("Backed up file '%s'", path)
-
-	// Calculate original hash
-	oldHash := sha256.New()
-	if _, err := io.Copy(oldHash, file); err != nil {
-		return err
-	}
 
 	// Prepare buffer
 	buf := make([]byte, 2)
