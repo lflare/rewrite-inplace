@@ -2,8 +2,10 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,6 +20,20 @@ var log *logrus.Logger
 
 const BLOCKSIZE = 128_000
 
+var completed = []string{}
+
+func saveCompleted() {
+	file, _ := json.MarshalIndent(completed, "", " ")
+	ioutil.WriteFile("progress.json", file, 0644)
+}
+
+func readCompleted() {
+	bytes, err := ioutil.ReadFile("progress.json")
+	if err == nil {
+		json.Unmarshal(bytes, &completed)
+	}
+}
+
 func writeSync(file *os.File, bytes []byte, offset int64) error {
 	// Write once
 	_, err := file.WriteAt(bytes, offset)
@@ -28,6 +44,14 @@ func writeSync(file *os.File, bytes []byte, offset int64) error {
 }
 
 func Rewrite(path string, info os.FileInfo, err error) error {
+	// Return early if already completed
+	for _, b := range completed {
+		if b == path {
+			log.Infof("Skipping file '%s'\n", path)
+			return nil
+		}
+	}
+
 	// Get file info if empty
 	if info == nil {
 		info, err = os.Stat(path)
@@ -151,6 +175,10 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		os.Remove(backupPath)
 	}
 
+	// Save progress
+	completed = append(completed, path)
+	saveCompleted()
+
 	// Check if signal was raised
 	select {
 	case <-done:
@@ -163,6 +191,7 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 
 func init() {
 	log = logrus.New()
+	readCompleted()
 }
 
 func main() {
