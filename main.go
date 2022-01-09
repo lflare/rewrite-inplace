@@ -22,6 +22,9 @@ const BLOCKSIZE = 128_000
 
 var completed = []string{}
 
+var skipByteShuffle = false
+var filePasses = 2
+
 func saveCompleted() {
 	file, _ := json.MarshalIndent(completed, "", " ")
 	ioutil.WriteFile("progress.json", file, 0644)
@@ -85,16 +88,26 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	}
 	defer backupFile.Close()
 
-	// Copy to backup file while calculating hash
-	log.Infof("Backing up file '%s'", path)
-	bar := progressbar.DefaultBytes(info.Size(), "backing up")
 	oldHash := sha256.New()
-	if _, err = io.Copy(io.MultiWriter(backupFile, bar, oldHash), file); err != nil {
-		return err
+	if !skipByteShuffle {
+		// Open backup file
+		backupPath := fmt.Sprintf("%s.bak", path)
+		backupFile, err := os.Create(backupPath)
+		if err != nil {
+			return err
+		}
+		defer backupFile.Close()
+
+		// Copy to backup file while calculating hash
+		log.Infof("Backing up file '%s'", path)
+		bar := progressbar.DefaultBytes(info.Size(), "backing up")
+		if _, err = io.Copy(io.MultiWriter(backupFile, bar, oldHash), file); err != nil {
+			return err
+		}
+		bar.Finish()
+		backupFile.Sync()
+		log.Infof("Backed up file '%s'", path)
 	}
-	bar.Finish()
-	backupFile.Sync()
-	log.Infof("Backed up file '%s'", path)
 
 	// Prepare buffer
 	buf := make([]byte, 2)
@@ -102,8 +115,8 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	// Print
 	log.Infof("Rewriting file '%s'", path)
 
-	// Run two times, swapping both times
-	for n := 0; n < 2; n++ {
+	// Run file passes
+	for n := 0; n < filePasses; n++ {
 		// Prepare progress bar
 		bar := progressbar.DefaultBytes(info.Size(), fmt.Sprintf("rewriting [%d/2]", n+1))
 
@@ -115,8 +128,10 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 				return fmt.Errorf("failed to read to buf: %v", err)
 			}
 
-			// Swap bytes
-			buf[0], buf[1] = buf[1], buf[0]
+			// Swap bytes if not skipping
+			if !skipByteShuffle {
+				buf[0], buf[1] = buf[1], buf[0]
+			}
 
 			// Write swapped bytes
 			if _, err := file.WriteAt(buf, i); err != nil {
@@ -154,16 +169,18 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	}
 
 	// If for some reason, hashes are not the same, restore backup
-	oldHashString := fmt.Sprintf("%x", oldHash.Sum(nil))
-	newHashString := fmt.Sprintf("%x", newHash.Sum(nil))
-	if oldHashString != newHashString {
-		bar := progressbar.DefaultBytes(info.Size(), "restoring")
-		io.Copy(io.MultiWriter(file, bar), backupFile)
-		bar.Finish()
-		os.Remove(backupPath)
-		return fmt.Errorf("unexpected hash of file '%s', '%s' != '%s', restored backup", path, oldHashString, newHashString)
-	} else {
-		os.Remove(backupPath)
+	if !skipByteShuffle {
+		oldHashString := fmt.Sprintf("%x", oldHash.Sum(nil))
+		newHashString := fmt.Sprintf("%x", newHash.Sum(nil))
+		if oldHashString != newHashString {
+			bar := progressbar.DefaultBytes(info.Size(), "restoring")
+			io.Copy(io.MultiWriter(file, bar), backupFile)
+			bar.Finish()
+			os.Remove(backupPath)
+			return fmt.Errorf("unexpected hash of file '%s', '%s' != '%s', restored backup", path, oldHashString, newHashString)
+		} else {
+			os.Remove(backupPath)
+		}
 	}
 
 	// Log
@@ -186,6 +203,11 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 func init() {
 	log = logrus.New()
 	readCompleted()
+
+	if len(os.Args) > 2 {
+		skipByteShuffle = true
+		filePasses = 1
+	}
 }
 
 func main() {
