@@ -34,15 +34,6 @@ func readCompleted() {
 	}
 }
 
-func writeSync(file *os.File, bytes []byte, offset int64) error {
-	// Write once
-	_, err := file.WriteAt(bytes, offset)
-	if err != nil {
-		return fmt.Errorf("failed to write buf2: %v", err)
-	}
-	return nil
-}
-
 func Rewrite(path string, info os.FileInfo, err error) error {
 	// Return early if already completed
 	for _, b := range completed {
