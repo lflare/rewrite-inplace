@@ -128,8 +128,7 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 			buf[0], buf[1] = buf[1], buf[0]
 
 			// Write swapped bytes
-			err = writeSync(file, buf, i)
-			if err != nil {
+			if _, err := file.WriteAt(buf, i); err != nil {
 				return err
 			}
 
