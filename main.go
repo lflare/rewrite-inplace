@@ -154,6 +154,9 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		}
 	}
 
+	// Rewind File to start
+	file.Seek(0, io.SeekStart)
+
 	// Calculate new hash
 	newHash := sha256.New()
 	if _, err := io.Copy(newHash, file); err != nil {
