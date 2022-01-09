@@ -144,14 +144,12 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		}
 
 		// Force filesystem sync
-		err = file.Sync()
-		if err != nil {
+		if err := file.Sync(); err != nil {
 			return fmt.Errorf("failed to sync: %v", err)
 		}
 
 		// Finish progress bar
-		err = bar.Finish()
-		if err != nil {
+		if err := bar.Finish(); err != nil {
 			panic(err) // Really shouldn't ever reach this point
 		}
 	}
