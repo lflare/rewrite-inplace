@@ -183,6 +183,11 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		}
 	}
 
+	// Set modified time back
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		log.Errorf("Failed to set modified time for file '%s'", path)
+	}
+
 	// Log
 	log.Infof("Rewritten file '%s'", path)
 
