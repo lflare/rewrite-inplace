@@ -66,6 +66,10 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
+	// Prepare signal catching
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
 	// Open file
 	file, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
 	if err != nil {
@@ -97,10 +101,6 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 
 	// Print
 	log.Infof("Rewriting file '%s'", path)
-
-	// Prepare signal catching
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	// Run two times, swapping both times
 	for n := 0; n < 2; n++ {
