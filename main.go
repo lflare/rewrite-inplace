@@ -118,7 +118,7 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	// Run file passes
 	for n := 0; n < filePasses; n++ {
 		// Prepare progress bar
-		bar := progressbar.DefaultBytes(info.Size(), fmt.Sprintf("rewriting [%d/2]", n+1))
+		bar := progressbar.DefaultBytes(info.Size(), fmt.Sprintf("rewriting [%d/%d]", n+1, filePasses))
 
 		// Loop through whole file in steps of block size
 		for i := int64(0); i < info.Size()-2; i += BLOCKSIZE {
