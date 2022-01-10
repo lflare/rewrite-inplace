@@ -24,6 +24,7 @@ var completed = []string{}
 
 var skipByteShuffle = false
 var filePasses = 2
+var done = make(chan os.Signal, 1)
 
 func saveCompleted() {
 	file, _ := json.MarshalIndent(completed, "", " ")
@@ -68,10 +69,6 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	if info.Size() < BLOCKSIZE {
 		return nil
 	}
-
-	// Prepare signal catching
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	// Open file
 	file, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
@@ -206,13 +203,18 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 }
 
 func init() {
+	// Prepare logger and load completed items
 	log = logrus.New()
 	readCompleted()
 
+	// Check argument length
 	if len(os.Args) > 2 {
 		skipByteShuffle = true
 		filePasses = 1
 	}
+
+	// Prepare signal handler
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 }
 
 func main() {
