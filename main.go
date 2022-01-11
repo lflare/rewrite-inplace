@@ -296,8 +296,9 @@ Flags:
 	// Get all files and folders
 	for {
 		err := filepath.Walk(flag.Arg(0), Rewrite)
-		if err == io.EOF && !continuous {
+		if err == io.EOF {
 			log.Infof("program exited successfully")
+			break
 		} else if err != nil {
 			panic(err)
 		}
