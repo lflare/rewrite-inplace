@@ -23,10 +23,10 @@ var log *logrus.Logger
 const BLOCKSIZE = 128_000
 
 var completed = []string{}
+var done = make(chan os.Signal, 1)
 
 var shuffleBytes bool
-var filePasses = 2
-var done = make(chan os.Signal, 1)
+var continuous bool
 
 func saveCompleted() {
 	file, _ := json.MarshalIndent(completed, "", " ")
@@ -205,11 +205,13 @@ func ShuffleRewriteFile(path string, info os.FileInfo) (err error) {
 }
 
 func Rewrite(path string, info os.FileInfo, err error) error {
-	// Return early if already completed
-	for _, b := range completed {
-		if b == path {
-			log.Infof("Skipping file '%s'\n", path)
-			return nil
+	// Return early if already completed and not continuously rewriting
+	if !continuous {
+		for _, b := range completed {
+			if b == path {
+				log.Infof("Skipping file '%s'\n", path)
+				return nil
+			}
 		}
 	}
 
@@ -270,6 +272,7 @@ func init() {
 
 func main() {
 	// Get arguments
+	flag.BoolVar(&continuous, "c", false, "continuously rewrite")
 	flag.BoolVar(&shuffleBytes, "s", false, "shuffle bytes on rewrite")
 	progname := filepath.Base(os.Args[0])
 	flag.Usage = func() {
@@ -291,10 +294,12 @@ Flags:
 	}
 
 	// Get all files and folders
-	err := filepath.Walk(flag.Arg(0), Rewrite)
-	if err == io.EOF {
-		log.Infof("program exited successfully")
-	} else if err != nil {
-		panic(err)
+	for {
+		err := filepath.Walk(flag.Arg(0), Rewrite)
+		if err == io.EOF && !continuous {
+			log.Infof("program exited successfully")
+		} else if err != nil {
+			panic(err)
+		}
 	}
 }
