@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"hash"
 	"io"
 	"io/ioutil"
 	"os"
@@ -22,7 +24,7 @@ const BLOCKSIZE = 128_000
 
 var completed = []string{}
 
-var skipByteShuffle = false
+var shuffleBytes bool
 var filePasses = 2
 var done = make(chan os.Signal, 1)
 
@@ -38,6 +40,170 @@ func readCompleted() {
 	}
 }
 
+func createBackupFile(path string, info os.FileInfo) (hash.Hash, error) {
+	// Prepare backup path
+	backupPath := fmt.Sprintf("%s.bak", path)
+
+	// Open backup file as readwrite
+	backupFile, err := os.Create(backupPath)
+	if err != nil {
+		return nil, err
+	}
+	defer backupFile.Close()
+
+	// Open file
+	file, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Prepare progressbar
+	log.Infof("Backing up file '%s'", path)
+	bar := progressbar.DefaultBytes(info.Size(), "backing up")
+	defer bar.Finish()
+
+	// Copy to backup file while calculating hash
+	hash := sha256.New()
+	if _, err = io.Copy(io.MultiWriter(backupFile, bar, hash), file); err != nil {
+		return nil, err
+	}
+
+	// Return hash with no error
+	return hash, nil
+}
+
+func deleteBackupFile(path string) (err error) {
+	// Prepare backup path
+	backupPath := fmt.Sprintf("%s.bak", path)
+
+	// Remove backup path if exists
+	if _, err = os.Stat(backupPath); err == nil {
+		if err = os.Remove(backupPath); err != nil {
+			return err
+		}
+	}
+
+	// No error
+	return nil
+}
+
+func restoreBackupFile(path string, info os.FileInfo) error {
+	// Prepare backup path
+	backupPath := fmt.Sprintf("%s.bak", path)
+
+	// Open backup file as readwrite
+	backupFile, err := os.OpenFile(backupPath, os.O_RDWR, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer backupFile.Close()
+
+	// Open file
+	file, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Prepare progressbar
+	log.Infof("Backing up file '%s'", path)
+	bar := progressbar.DefaultBytes(info.Size(), "backing up")
+	defer bar.Finish()
+
+	// Copy to original file
+	if _, err = io.Copy(io.MultiWriter(file, bar), backupFile); err != nil {
+		return err
+	}
+
+	// Return with no error
+	return nil
+}
+
+func RewriteFile(path string, info os.FileInfo, shuffle bool) (hash.Hash, error) {
+	// Open file
+	file, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Prepare progress bar
+	bar := progressbar.DefaultBytes(info.Size(), "rewriting")
+
+	// Loop through whole file in BLOCKSIZE chunks
+	hash := sha256.New()
+	for i := int64(0); i < info.Size(); i += BLOCKSIZE {
+		// Prepare buffer
+		buf := make([]byte, BLOCKSIZE)
+
+		// Read BLOCKSIZE bytes at offset
+		n, err := file.ReadAt(buf, i)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("failed to read to buf: %v", err)
+		}
+		buf = buf[:n]
+
+		// Swap bytes if specified and able
+		if shuffle && n > 2 {
+			buf[0], buf[1] = buf[1], buf[0]
+		}
+
+		// Write BLOCKSIZE bytes back at offset
+		if _, err := file.WriteAt(buf, i); err != nil {
+			return nil, err
+		}
+
+		// Add to hash
+		hash.Write(buf)
+
+		// Propagate progress bar
+		if err = bar.Add(BLOCKSIZE); err != nil {
+			if err = bar.Finish(); err != nil {
+				panic(err) // Really shouldn't ever reach this point
+			}
+		}
+	}
+
+	// Set modified time back
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		log.Errorf("Failed to set modified time for file '%s'", path)
+	}
+
+	// Return hash with no error
+	return hash, nil
+}
+
+func ShuffleRewriteFile(path string, info os.FileInfo) (err error) {
+	// Backup file
+	var oldHash hash.Hash
+	if oldHash, err = createBackupFile(path, info); err != nil {
+		return err
+	}
+
+	// Loop twice
+	var newHash hash.Hash
+	for n := 0; n < 2; n++ {
+		if newHash, err = RewriteFile(path, info, true); err != nil {
+			return err
+		}
+	}
+
+	// If for some reason, hashes are not the same, restore backup
+	oldHashString := fmt.Sprintf("%x", oldHash.Sum(nil))
+	newHashString := fmt.Sprintf("%x", newHash.Sum(nil))
+	if oldHashString != newHashString {
+		restoreBackupFile(path, info)
+		return fmt.Errorf("rewrite failed, hash mismatch '%s' != '%s'", oldHashString, newHashString)
+	}
+
+	// Delete backup file
+	deleteBackupFile(path)
+
+	// Return no error
+	return nil
+}
+
 func Rewrite(path string, info os.FileInfo, err error) error {
 	// Return early if already completed
 	for _, b := range completed {
@@ -45,6 +211,11 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 			log.Infof("Skipping file '%s'\n", path)
 			return nil
 		}
+	}
+
+	// Return early if error
+	if err != nil {
+		return err
 	}
 
 	// Get file info if empty
@@ -55,131 +226,20 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		}
 	}
 
-	// Return early if error
-	if err != nil {
-		return err
-	}
-
 	// Return early if not file
 	if info.IsDir() {
 		return nil
 	}
 
-	// Return early if too small to actually balance
-	if info.Size() < BLOCKSIZE {
-		return nil
-	}
-
-	// Open backup file
-	backupPath := fmt.Sprintf("%s.bak", path)
-	var backupFile *os.File = nil
-
-	// Open file
-	file, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	oldHash := sha256.New()
-	if !skipByteShuffle {
-		// Create backup file if byte shuffling exists
-		backupFile, err = os.Create(backupPath)
-		if err != nil {
+	// Rewrite file
+	if shuffleBytes {
+		if err := ShuffleRewriteFile(path, info); err != nil {
 			return err
 		}
-		defer backupFile.Close()
-
-		// Copy to backup file while calculating hash
-		log.Infof("Backing up file '%s'", path)
-		bar := progressbar.DefaultBytes(info.Size(), "backing up")
-		if _, err = io.Copy(io.MultiWriter(backupFile, bar, oldHash), file); err != nil {
+	} else {
+		if _, err := RewriteFile(path, info, false); err != nil {
 			return err
 		}
-		bar.Finish()
-		backupFile.Sync()
-		log.Infof("Backed up file '%s'", path)
-	}
-
-	// Prepare buffer
-	buf := make([]byte, 2)
-
-	// Print
-	log.Infof("Rewriting file '%s'", path)
-
-	// Run file passes
-	for n := 0; n < filePasses; n++ {
-		// Prepare progress bar
-		bar := progressbar.DefaultBytes(info.Size(), fmt.Sprintf("rewriting [%d/%d]", n+1, filePasses))
-
-		// Loop through whole file in steps of block size
-		for i := int64(0); i < info.Size()-2; i += BLOCKSIZE {
-			// Read two bytes at offset
-			_, err = file.ReadAt(buf, i)
-			if err != nil {
-				return fmt.Errorf("failed to read to buf: %v", err)
-			}
-
-			// Swap bytes if not skipping
-			if !skipByteShuffle {
-				buf[0], buf[1] = buf[1], buf[0]
-			}
-
-			// Write swapped bytes
-			if _, err := file.WriteAt(buf, i); err != nil {
-				return err
-			}
-
-			// Propagate progress bar
-			err = bar.Add(BLOCKSIZE)
-			if err != nil {
-				err = bar.Finish()
-				if err != nil {
-					panic(err) // Really shouldn't ever reach this point
-				}
-			}
-		}
-
-		// Force filesystem sync
-		if err := file.Sync(); err != nil {
-			return fmt.Errorf("failed to sync: %v", err)
-		}
-
-		// Finish progress bar
-		if err := bar.Finish(); err != nil {
-			panic(err) // Really shouldn't ever reach this point
-		}
-	}
-
-	// Rewind File to start
-	file.Seek(0, io.SeekStart)
-
-	// Calculate new hash
-	newHash := sha256.New()
-	if _, err := io.Copy(newHash, file); err != nil {
-		return err
-	}
-
-	// If for some reason, hashes are not the same, restore backup
-	if !skipByteShuffle {
-		oldHashString := fmt.Sprintf("%x", oldHash.Sum(nil))
-		newHashString := fmt.Sprintf("%x", newHash.Sum(nil))
-		if oldHashString != newHashString {
-			bar := progressbar.DefaultBytes(info.Size(), "restoring")
-			io.Copy(io.MultiWriter(file, bar), backupFile)
-			bar.Finish()
-			return fmt.Errorf("unexpected hash of file '%s', '%s' != '%s', restored backup", path, oldHashString, newHashString)
-		}
-	}
-
-	// Remove backup path if exists
-	if _, err := os.Stat(backupPath); err == nil {
-		os.Remove(backupPath)
-	}
-
-	// Set modified time back
-	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
-		log.Errorf("Failed to set modified time for file '%s'", path)
 	}
 
 	// Log
@@ -204,19 +264,34 @@ func init() {
 	log = logrus.New()
 	readCompleted()
 
-	// Check argument length
-	if len(os.Args) > 2 {
-		skipByteShuffle = true
-		filePasses = 1
-	}
-
 	// Prepare signal handler
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 }
 
 func main() {
+	// Get arguments
+	flag.BoolVar(&shuffleBytes, "s", false, "shuffle bytes on rewrite")
+	progname := filepath.Base(os.Args[0])
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `
+Usage of %s:
+
+  %s [flags] ./directory
+
+Flags:
+`, progname, progname)
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	// Check argument count
+	if flag.NArg() != 1 {
+		flag.Usage()
+		os.Exit(1)
+	}
+
 	// Get all files and folders
-	err := filepath.Walk(os.Args[1], Rewrite)
+	err := filepath.Walk(flag.Arg(0), Rewrite)
 	if err == io.EOF {
 		log.Infof("program exited successfully")
 	} else if err != nil {
