@@ -70,6 +70,10 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		return nil
 	}
 
+	// Open backup file
+	backupPath := fmt.Sprintf("%s.bak", path)
+	var backupFile *os.File = nil
+
 	// Open file
 	file, err := os.OpenFile(path, os.O_RDWR, info.Mode().Perm())
 	if err != nil {
@@ -77,19 +81,10 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	}
 	defer file.Close()
 
-	// Open backup file
-	backupPath := fmt.Sprintf("%s.bak", path)
-	backupFile, err := os.Create(backupPath)
-	if err != nil {
-		return err
-	}
-	defer backupFile.Close()
-
 	oldHash := sha256.New()
 	if !skipByteShuffle {
-		// Open backup file
-		backupPath := fmt.Sprintf("%s.bak", path)
-		backupFile, err := os.Create(backupPath)
+		// Create backup file if byte shuffling exists
+		backupFile, err = os.Create(backupPath)
 		if err != nil {
 			return err
 		}
@@ -173,11 +168,13 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 			bar := progressbar.DefaultBytes(info.Size(), "restoring")
 			io.Copy(io.MultiWriter(file, bar), backupFile)
 			bar.Finish()
-			os.Remove(backupPath)
 			return fmt.Errorf("unexpected hash of file '%s', '%s' != '%s', restored backup", path, oldHashString, newHashString)
-		} else {
-			os.Remove(backupPath)
 		}
+	}
+
+	// Remove backup path if exists
+	if _, err := os.Stat(backupPath); err == nil {
+		os.Remove(backupPath)
 	}
 
 	// Set modified time back
