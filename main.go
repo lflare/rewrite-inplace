@@ -302,5 +302,9 @@ Flags:
 		} else if err != nil {
 			panic(err)
 		}
+
+        if !continuous {
+            break
+        }
 	}
 }
