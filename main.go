@@ -38,8 +38,8 @@ type Completed struct {
 var completed = Completed{}
 
 func saveCompleted() {
-	file, _ := json.MarshalIndent(completed, "", " ")
-	if err := ioutil.WriteFile("progress.json", file, 0644); err != nil {
+	data, _ := json.MarshalIndent(completed, "", " ")
+	if err := os.WriteFile("progress.json", data, 0644); err != nil {
 		panic(err)
 	}
 }
@@ -73,7 +73,11 @@ func createBackupFile(path string, info os.FileInfo) (hash.Hash, error) {
 	// Prepare progressbar
 	log.Infof("Backing up file '%s'", path)
 	bar := progressbar.DefaultBytes(info.Size(), "backing up")
-	defer bar.Finish()
+	defer func() {
+		if err := bar.Finish(); err != nil {
+			log.Error(err)
+		}
+	}()
 
 	// Copy to backup file while calculating hash
 	hash := sha256.New()
@@ -121,7 +125,11 @@ func restoreBackupFile(path string, info os.FileInfo) error {
 	// Prepare progressbar
 	log.Infof("Backing up file '%s'", path)
 	bar := progressbar.DefaultBytes(info.Size(), "backing up")
-	defer bar.Finish()
+	defer func() {
+		if err := bar.Finish(); err != nil {
+			log.Error(err)
+		}
+	}()
 
 	// Copy to original file
 	if _, err = io.Copy(io.MultiWriter(file, bar), backupFile); err != nil {
@@ -205,12 +213,16 @@ func ShuffleRewriteFile(path string, info os.FileInfo) (err error) {
 	oldHashString := fmt.Sprintf("%x", oldHash.Sum(nil))
 	newHashString := fmt.Sprintf("%x", newHash.Sum(nil))
 	if oldHashString != newHashString {
-		restoreBackupFile(path, info)
+		if err := restoreBackupFile(path, info); err != nil {
+			log.Errorf("failed to restore backup: %v", err)
+		}
 		return fmt.Errorf("rewrite failed, hash mismatch '%s' != '%s'", oldHashString, newHashString)
 	}
 
 	// Delete backup file
-	deleteBackupFile(path)
+	if err := deleteBackupFile(path); err != nil {
+		log.Errorf("failed to delete backup file: %v", err)
+	}
 
 	// Return no error
 	return nil
@@ -249,7 +261,7 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 
 		for _, b := range completed.CompletedInodes {
 			if b == inode {
-				log.Infof("Skipping inode '%s'\n", inode)
+				log.Infof("Skipping inode '%d'\n", inode)
 
 				// Check if path exists
 				pathExists := false
