@@ -326,8 +326,8 @@ Flags:
 			panic(err)
 		}
 
-        if !continuous {
-            break
-        }
+		if !continuous {
+			break
+		}
 	}
 }
