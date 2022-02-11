@@ -223,6 +223,23 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		for _, b := range completed.completedFiles {
 			if b == path {
 				log.Infof("Skipping file '%s'\n", path)
+
+				// Check if inode exists
+				inodeExists := false
+				for _, i := range completed.completedInodes {
+					if i == inode {
+						inodeExists = true
+						break
+					}
+				}
+
+				// If not exists, add
+				if !inodeExists {
+					completed.completedInodes = append(completed.completedInodes, inode)
+					saveCompleted()
+				}
+
+				// Return early
 				return nil
 			}
 		}
@@ -230,6 +247,8 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 		for _, b := range completed.completedInodes {
 			if b == inode {
 				log.Infof("Skipping inode '%s'\n", inode)
+
+				// Return early
 				return nil
 			}
 		}
