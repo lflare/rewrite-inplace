@@ -251,7 +251,6 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 				// If not exists, add
 				if !inodeExists {
 					completed.CompletedInodes = append(completed.CompletedInodes, inode)
-					saveCompleted()
 				}
 
 				// Return early
@@ -275,7 +274,6 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 				// If not exists, add
 				if !pathExists {
 					completed.CompletedFiles = append(completed.CompletedFiles, path)
-					saveCompleted()
 				}
 
 				// Return early
