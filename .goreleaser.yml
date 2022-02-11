@@ -18,18 +18,14 @@ builds:
         - /bin/sh -c "upx -q '{{.Path}}' || true"
     goos:
       - aix
-      - android
       - darwin
       - dragonfly
       - freebsd
       - illumos
-      - js
       - linux
       - netbsd
       - openbsd
-      - plan9
       - solaris
-      - windows
     goarch:
       - 386
       - amd64
@@ -51,10 +47,6 @@ builds:
     gomips:
       - hardfloat
       - softfloat
-    ignore:
-      - goos: android
-      - goos: js
-      - goos: plan9
 
 archives:
   - format: binary
