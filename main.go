@@ -45,9 +45,7 @@ func saveCompleted() {
 }
 
 func readCompleted() {
-	if bytes, err := ioutil.ReadFile("progress.json"); err != nil {
-		panic(err)
-	} else {
+	if bytes, err := ioutil.ReadFile("progress.json"); err == nil {
 		if err := json.Unmarshal(bytes, &completed); err != nil {
 			panic(err)
 		}
