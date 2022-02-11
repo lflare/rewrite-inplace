@@ -18,15 +18,24 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var log *logrus.Logger
-
+// Constants
 const BLOCKSIZE = 128_000
 
-var completed = []string{}
-var done = make(chan os.Signal, 1)
-
+// Configurations
 var shuffleBytes bool
 var continuous bool
+
+// Runtime globals
+var log *logrus.Logger
+var done = make(chan os.Signal, 1)
+
+// Completed files
+type Completed struct {
+	completedFiles  []string `json:"completed_files"`
+	completedInodes []uint64 `json:"completed_inodes`
+}
+
+var completed Completed
 
 func saveCompleted() {
 	file, _ := json.MarshalIndent(completed, "", " ")
@@ -205,11 +214,22 @@ func ShuffleRewriteFile(path string, info os.FileInfo) (err error) {
 }
 
 func Rewrite(path string, info os.FileInfo, err error) error {
+	// Get inode
+	stat, _ := info.Sys().(*syscall.Stat_t)
+	inode := stat.Ino
+
 	// Return early if already completed and not continuously rewriting
 	if !continuous {
-		for _, b := range completed {
+		for _, b := range completed.completedFiles {
 			if b == path {
 				log.Infof("Skipping file '%s'\n", path)
+				return nil
+			}
+		}
+
+		for _, b := range completed.completedInodes {
+			if b == inode {
+				log.Infof("Skipping inode '%s'\n", inode)
 				return nil
 			}
 		}
@@ -248,7 +268,10 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	log.Infof("Rewritten file '%s'", path)
 
 	// Save progress
-	completed = append(completed, path)
+	completed.completedFiles = append(completed.completedFiles, path)
+	if stat != nil {
+		completed.completedInodes = append(completed.completedInodes, stat.Ino)
+	}
 	saveCompleted()
 
 	// Check if signal was raised
