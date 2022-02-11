@@ -31,21 +31,26 @@ var done = make(chan os.Signal, 1)
 
 // Completed files
 type Completed struct {
-	completedFiles  []string `json:"completed_files"`
-	completedInodes []uint64 `json:"completed_inodes`
+	CompletedFiles  []string `json:"completed_files"`
+	CompletedInodes []uint64 `json:"completed_inodes"`
 }
 
-var completed Completed
+var completed = Completed{}
 
 func saveCompleted() {
 	file, _ := json.MarshalIndent(completed, "", " ")
-	ioutil.WriteFile("progress.json", file, 0644)
+	if err := ioutil.WriteFile("progress.json", file, 0644); err != nil {
+		panic(err)
+	}
 }
 
 func readCompleted() {
-	bytes, err := ioutil.ReadFile("progress.json")
-	if err == nil {
-		json.Unmarshal(bytes, &completed)
+	if bytes, err := ioutil.ReadFile("progress.json"); err != nil {
+		panic(err)
+	} else {
+		if err := json.Unmarshal(bytes, &completed); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -220,13 +225,13 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 
 	// Return early if already completed and not continuously rewriting
 	if !continuous {
-		for _, b := range completed.completedFiles {
+		for _, b := range completed.CompletedFiles {
 			if b == path {
 				log.Infof("Skipping file '%s'\n", path)
 
 				// Check if inode exists
 				inodeExists := false
-				for _, i := range completed.completedInodes {
+				for _, i := range completed.CompletedInodes {
 					if i == inode {
 						inodeExists = true
 						break
@@ -235,7 +240,7 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 
 				// If not exists, add
 				if !inodeExists {
-					completed.completedInodes = append(completed.completedInodes, inode)
+					completed.CompletedInodes = append(completed.CompletedInodes, inode)
 					saveCompleted()
 				}
 
@@ -244,7 +249,7 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 			}
 		}
 
-		for _, b := range completed.completedInodes {
+		for _, b := range completed.CompletedInodes {
 			if b == inode {
 				log.Infof("Skipping inode '%s'\n", inode)
 
@@ -287,9 +292,9 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	log.Infof("Rewritten file '%s'", path)
 
 	// Save progress
-	completed.completedFiles = append(completed.completedFiles, path)
+	completed.CompletedFiles = append(completed.CompletedFiles, path)
 	if stat != nil {
-		completed.completedInodes = append(completed.completedInodes, stat.Ino)
+		completed.CompletedInodes = append(completed.CompletedInodes, stat.Ino)
 	}
 	saveCompleted()
 
