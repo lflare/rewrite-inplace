@@ -251,6 +251,21 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 			if b == inode {
 				log.Infof("Skipping inode '%s'\n", inode)
 
+				// Check if path exists
+				pathExists := false
+				for _, i := range completed.CompletedFiles {
+					if i == path {
+						pathExists = true
+						break
+					}
+				}
+
+				// If not exists, add
+				if !pathExists {
+					completed.CompletedFiles = append(completed.CompletedFiles, path)
+					saveCompleted()
+				}
+
 				// Return early
 				return nil
 			}
