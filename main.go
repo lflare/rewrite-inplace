@@ -11,8 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
-	"time"
 
 	progressbar "github.com/schollz/progressbar/v3"
 	"github.com/sirupsen/logrus"
@@ -24,6 +24,10 @@ const BLOCKSIZE = 128_000
 // Configurations
 var shuffleBytes bool
 var continuous bool
+var threads int
+var guard chan struct{}
+var wg sync.WaitGroup
+var finished bool
 
 // Runtime globals
 var log *logrus.Logger
@@ -228,68 +232,60 @@ func ShuffleRewriteFile(path string, info os.FileInfo) (err error) {
 	return nil
 }
 
+func IsCompleted(path string, inode uint64) bool {
+	for _, b := range completed.CompletedFiles {
+		if b == path {
+			log.Infof("Skipping file '%s'\n", path)
+
+			// Check if inode exists
+			inodeExists := false
+			for _, i := range completed.CompletedInodes {
+				if i == inode {
+					inodeExists = true
+					break
+				}
+			}
+
+			// If not in CompletedInodes, add to it
+			if !inodeExists {
+				completed.CompletedInodes = append(completed.CompletedInodes, inode)
+			}
+
+			// Return early
+			return false
+		}
+	}
+
+	for _, b := range completed.CompletedInodes {
+		if b == inode {
+			log.Infof("Skipping inode '%d'\n", inode)
+
+			// Check if path exists
+			pathExists := false
+			for _, i := range completed.CompletedFiles {
+				if i == path {
+					pathExists = true
+					break
+				}
+			}
+
+			// If not in CompletedFiles, add to it
+			if !pathExists {
+				completed.CompletedFiles = append(completed.CompletedFiles, path)
+			}
+
+			// Return early
+			return false
+		}
+	}
+
+	return true
+}
+
 func Rewrite(path string, info os.FileInfo, err error) error {
-	// Get inode
-	stat, _ := info.Sys().(*syscall.Stat_t)
-	inode := stat.Ino
-
-	// Return early if already completed and not continuously rewriting
-	if !continuous {
-		for _, b := range completed.CompletedFiles {
-			if b == path {
-				log.Infof("Skipping file '%s'\n", path)
-
-				// Check if inode exists
-				inodeExists := false
-				for _, i := range completed.CompletedInodes {
-					if i == inode {
-						inodeExists = true
-						break
-					}
-				}
-
-				// If not exists, add
-				if !inodeExists {
-					completed.CompletedInodes = append(completed.CompletedInodes, inode)
-				}
-
-				// Return early
-				return nil
-			}
-		}
-
-		for _, b := range completed.CompletedInodes {
-			if b == inode {
-				log.Infof("Skipping inode '%d'\n", inode)
-
-				// Check if path exists
-				pathExists := false
-				for _, i := range completed.CompletedFiles {
-					if i == path {
-						pathExists = true
-						break
-					}
-				}
-
-				// If not exists, add
-				if !pathExists {
-					completed.CompletedFiles = append(completed.CompletedFiles, path)
-				}
-
-				// Return early
-				return nil
-			}
-		}
-	}
-
-	// Return early if error
-	if err != nil {
-		return err
-	}
-
-	// Get file info if empty
+	// Call lstat() if info is nil, return if error
 	if info == nil {
-		info, err = os.Stat(path)
+		info, err = os.Lstat(path)
 		if err != nil {
 			return err
 		}
@@ -297,6 +293,20 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 
 	// Return early if not file
 	if info.IsDir() {
+		return nil
+	}
+
+	// Get file inode
+	stat, _ := info.Sys().(*syscall.Stat_t)
+	inode := stat.Ino
+
+	// Return early if error
+	if err != nil {
+		return err
+	}
+
+	// Return early if already completed and not continuously rewriting
+	if !continuous && !IsCompleted(path, inode) {
 		return nil
 	}
 
@@ -321,13 +331,29 @@ func Rewrite(path string, info os.FileInfo, err error) error {
 	}
 	saveCompleted()
 
-	// Check if signal was raised
-	select {
-	case <-done:
+	// Return nil
+	return nil
+}
+
+func RewriteRouting(path string, info os.FileInfo, err error) error {
+	// Start goroutine
+	guard <- struct{}{}
+	wg.Add(1)
+	go func() {
+		err = Rewrite(path, info, err)
+		if err != nil {
+			log.Errorf("Rewrite failed: %+v", err)
+		}
+		wg.Done()
+		<-guard
+	}()
+
+	// Return error if finished
+	if finished {
 		return io.EOF
-	case <-time.After(1):
 	}
 
+	// Else continue
 	return nil
 }
 
@@ -344,6 +370,7 @@ func main() {
 	// Get arguments
 	flag.BoolVar(&continuous, "c", false, "continuously rewrite")
 	flag.BoolVar(&shuffleBytes, "s", false, "shuffle bytes on rewrite")
+	flag.IntVar(&threads, "t", 1, "threads")
 	progname := filepath.Base(os.Args[0])
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `
@@ -363,13 +390,22 @@ Flags:
 		os.Exit(1)
 	}
 
+	// Ensure quit
+	go func() {
+		<-done
+		log.Infof("Finishing...")
+		finished = true
+	}()
+
 	// Get all files and folders
+	guard = make(chan struct{}, threads)
 	for {
-		err := filepath.Walk(flag.Arg(0), Rewrite)
-		if err == io.EOF {
-			log.Infof("program exited successfully")
+		err := filepath.Walk(flag.Arg(0), RewriteRouting)
+		if err == io.EOF || finished {
+			log.Infof("Program exited successfully")
 			break
 		} else if err != nil {
+			close(guard)
 			panic(err)
 		}
 
@@ -377,4 +413,7 @@ Flags:
 			break
 		}
 	}
+
+	// Cleanup
+	wg.Wait()
 }
