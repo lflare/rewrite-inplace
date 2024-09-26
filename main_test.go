@@ -90,6 +90,7 @@ func TestRewrite(t *testing.T) {
 	for i, size := range sizes {
 		// Prepare path
 		path := fmt.Sprintf("%s/%d", dir, i)
+		fmt.Printf("%s", path)
 
 		// Generate random sequence of bytes 16 megabytes
 		randomString := RandStringBytesMaskImprSrcUnsafe(size)
@@ -121,7 +122,8 @@ func TestRewrite(t *testing.T) {
 		assert.Equal(t, randomBytes, writtenBytes, "[step 1] written bytes != random bytes")
 
 		// Rewrite file
-		Rewrite(path, nil, err)
+		err = Rewrite(path, nil, err)
+		assert.NoError(t, err)
 
 		// Ensure equal
 		assert.Equal(t, randomBytes, writtenBytes, "[step 2] rewritten bytes != written bytes")
